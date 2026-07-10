@@ -19,7 +19,9 @@ The resolution oracle is Chainlink's BTC/USD Data Stream (`data.chain.link/strea
 Polymarket's own public realtime feed happens to stream that exact Chainlink value for free and without authentication (see section 5).
 This was the single biggest planning surprise on this project: an earlier planning pass assumed paid Chainlink Data Streams credentials might eventually be needed for a live trading strategy to track the resolution price precisely, and that assumption turned out to be wrong once tested against the real API.
 
-**No API keys, accounts, or credentials of any kind are required for anything currently built.** Everything runs against `polymarket.AsyncPublicClient`, which is fully unauthenticated. Credentials would only enter the picture for a possible future Phase 5 (placing real orders via `AsyncSecureClient`), which is not built and not a default next step.
+**No API keys, accounts, or credentials are required for discovery, ingestion, backfill, paper execution, or the dashboard.** These paths use `polymarket.AsyncPublicClient`.
+The live execution foundation uses `AsyncSecureClient`, an exported signer private key, and the public profile wallet address.
+Relayer credentials are required only for missing approvals, redemption, and other gasless wallet operations.
 
 ### Phases and status
 
@@ -29,7 +31,7 @@ This was the single biggest planning surprise on this project: an earlier planni
 | 2 | Data pipeline (realtime ingestion + historical backfill) | Done |
 | 3 | Live tracker dashboard (FastAPI + WebSocket) | Done |
 | 4 | Backtest engine | **Skipped by explicit user request**, not started. The data model was designed to support it without changes; see section 9. |
-| 5 | Live trade execution | Not started, not planned by default. Would need `AsyncSecureClient` plus a private key, funded Polygon wallet, and (for wallet ops) a Relayer API key. |
+| 5 | Live execution foundation | Built: authenticated doctor, paper gate, protected $5 live test, audit persistence, reconciliation, approvals, and redemption. No automated strategy yet. |
 
 ### Engineering approach: no mocks
 
@@ -208,7 +210,7 @@ These were only caught because tests run against the real API and real SQLite, n
 
 1. **SQLModel + `Literal` table columns crash at class-definition time.** `TypeError: issubclass() arg 1 must be a class` inside SQLModel's `get_sqlalchemy_type()` when a table field is typed `Literal["up", "down"]`. Fix: table columns use plain `str`; the `Outcome = Literal["up", "down"]` alias in `store.py` is kept only as a non-table type hint (used in `ingest.py`'s `_side_for_token` return type, for example).
 2. **SQLAlchemy's default `expire_on_commit=True` silently blanks objects after commit.** `repr(obj)` immediately after `session.commit()` printed as an empty `ResolvedMarket()` until an attribute was touched (which triggers a surprise re-query). This bit debugging directly (a backfill result printed as nothing) and would have bitten the dashboard too, since it holds onto rows post-commit. Fixed by building all sessions with `expire_on_commit=False` in `store.get_session()`.
-3. **`AsyncPublicClient` has no `.create()` classmethod**, despite what the prose docs' code samples imply. Plain constructor, used as an async context manager.
+3. **`AsyncPublicClient` has no `.create()` classmethod, but `AsyncSecureClient` does.** Use the public client's plain constructor and create secure clients with `await AsyncSecureClient.create(...)` so credentials and wallet type are resolved before authenticated calls.
 4. **Paginated methods are not coroutines** - `search()` etc. return an `AsyncPaginator` synchronously; forgetting to call `.first_page()` (or iterate) and instead trying to `await` the paginator directly raises `TypeError: object AsyncPaginator can't be used in 'await' expression`.
 5. **`subscribe()` needs to be awaited before it's an async iterator** - passing the un-awaited coroutine straight into `async for` fails with `TypeError: 'async for' requires an object with __aiter__ method, got coroutine`.
 6. **Chainlink price feed symbol format** - `"BTC"` and `"BTCUSDT"` silently return zero events (no error, just nothing arrives); the correct format is `"btc/usd"` (lowercase, slash). Discovered by removing the `symbols` filter entirely, observing all symbols streaming (`doge/usd`, `xrp/usd`, `hype/usd`, ...), and reading the format off real payloads.
@@ -230,9 +232,14 @@ A reasonable first implementation: for each `ResolvedMarket`, pull its `MarketTi
 
 If full order-book depth turns out to matter for realistic fill simulation, the cheapest change is to also persist `MarketBookEvent` snapshots (currently dropped after updating `LiveOrderBook.books`) - be mindful of the storage/throughput tradeoff that was the reason they are not persisted today.
 
-### Building Phase 5 (live execution)
+### Extending Phase 5 (live execution)
 
-Would require: `polymarket.AsyncSecureClient` instead of/alongside `AsyncPublicClient`, a `POLYMARKET_PRIVATE_KEY`, a funded Polygon wallet with USDC, one-time `setup_trading_approvals()`, and (only for wallet-level operations, not order placement itself) a Relayer API key pair. None of this exists in the codebase today. Treat as a distinct, deliberate go/no-go decision, not a default continuation of Phase 4.
+The execution foundation lives in `polytracker.trading` and deliberately stops short of choosing a strategy.
+It provides one shared prepared-order contract for paper and live executors, a one-full-market paper gate, a protected FAK live test capped at $5, append-oriented intent and fill records, authenticated reconciliation, and explicit setup and redemption commands.
+The live command remains disabled unless `POLYTRACKER_LIVE_ENABLED=true`, the current market slug is confirmed exactly, the order book is fresh, enough time remains, the wallet is funded and approved, no prior live intent exists for the market, and Polymarket reports the current connection as geographically eligible.
+An ambiguous network failure after submission is persisted as `unknown` and is never automatically retried.
+Reconciliation must establish the remote order or trade state first.
+Future strategy work should emit the existing prepared intent type and retain all current risk checks rather than calling the SDK directly.
 
 ### Adding a CLI entry point for headless ingestion
 

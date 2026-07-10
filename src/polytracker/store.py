@@ -1,4 +1,4 @@
-"""SQLite-backed datastore for market ticks, BTC spot ticks, and resolved outcomes."""
+"""SQLite-backed datastore for market data and trade execution records."""
 
 from __future__ import annotations
 
@@ -49,6 +49,59 @@ class ResolvedMarket(SQLModel, table=True):
     window_start: datetime = Field(index=True)
     window_end: datetime
     outcome: str
+
+
+class PaperTradingRun(SQLModel, table=True):
+    """A full-market paper validation run required before live testing."""
+
+    id: str = Field(primary_key=True)
+    market_slug: str = Field(index=True)
+    started_at: datetime = Field(index=True)
+    window_start: datetime
+    window_end: datetime
+    completed_at: datetime | None = None
+    status: str = Field(index=True)
+    intent_id: str | None = None
+    error_message: str | None = None
+
+
+class TradeIntent(SQLModel, table=True):
+    """One idempotent paper or live order request and its latest state."""
+
+    id: str = Field(primary_key=True)
+    created_at: datetime = Field(index=True)
+    updated_at: datetime
+    mode: str = Field(index=True)
+    market_slug: str = Field(index=True)
+    condition_id: str
+    token_id: str = Field(index=True)
+    outcome: str
+    side: str
+    requested_amount: str
+    max_spend: str
+    max_price: str
+    status: str = Field(index=True)
+    order_id: str | None = Field(default=None, index=True)
+    remote_status: str | None = None
+    making_amount: str | None = None
+    taking_amount: str | None = None
+    average_fill_price: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    reconciled_at: datetime | None = None
+
+
+class TradeFill(SQLModel, table=True):
+    """A fill associated with a locally persisted trade intent."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    intent_id: str = Field(index=True)
+    trade_id: str = Field(index=True)
+    price: str
+    size: str
+    status: str
+    transaction_hash: str | None = None
+    matched_at: datetime | None = Field(default=None, index=True)
 
 
 def make_engine(db_path: Path | str = DEFAULT_DB_PATH):

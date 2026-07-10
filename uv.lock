@@ -744,6 +744,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "polymarket-client" },
+    { name = "python-dotenv" },
     { name = "sqlmodel" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -759,6 +760,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.139.0" },
     { name = "polymarket-client", specifier = ">=0.1.0b16" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "sqlmodel", specifier = ">=0.0.39" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
 ]
