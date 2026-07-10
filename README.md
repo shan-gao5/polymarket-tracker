@@ -60,5 +60,8 @@ Set `POLYTRACKER_DB_PATH` to point it at a different SQLite file.
 
 ## Notes for contributors
 
+See `DESIGN.md` for the full technical design doc: architecture, module-by-module reference, data model, verified `polymarket-client` API behavior, bugs found by testing live, and extension points for Phase 4/5.
+It is written to be loaded whole into an agent's context with no other history needed.
+
 See `AGENTS.md` for general engineering guidelines.
-See the `polymarket-client` skill at `.claude/skills/polymarket-client/SKILL.md` for API gotchas discovered by testing against the live service, since the published docs at docs.polymarket.com are directionally right but wrong on several concrete details (import name, constructor style, pagination, subscription shape, and more).
+See the `polymarket-client` skill at `.claude/skills/polymarket-client/SKILL.md` for the load-on-demand version of the API gotchas (also included inline in `DESIGN.md`).
