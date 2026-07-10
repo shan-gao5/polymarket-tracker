@@ -16,8 +16,18 @@ If a new package version changes any of this, update this file rather than redis
 
 - Import name is `polymarket`, not `polymarket_client`.
   Install with `uv add polymarket-client`.
-- `AsyncPublicClient` / `AsyncSecureClient` are plain dataclass-style constructors, not `.create()` classmethods.
+- `AsyncPublicClient` is a plain constructor and async context manager.
   Use `async with polymarket.AsyncPublicClient() as client:`.
+- `AsyncSecureClient` must be created with the async factory so it can derive or validate credentials and resolve the selected wallet.
+  Use `async with await polymarket.AsyncSecureClient.create(private_key=..., wallet=...) as client:`.
+- `AsyncSecureClient.create()` derives CLOB API credentials when `credentials=` is omitted, classifies the wallet from the signer and supplied address, and validates that deterministic relationship.
+  Passing the exported Google/Magic signer and its Polymarket profile address classifies as `POLY_PROXY`.
+- `AsyncSecureClient.create()` accepts an optional `RelayerApiKey(key=..., address=...)` as `api_key=` for gasless wallet operations.
+  Normal order placement does not require that relayer key when the wallet already has current approvals.
+- High-level live methods include `place_limit_order()`, `place_market_order()`, `list_open_orders()`, `list_account_trades()`, `get_balance_allowance()`, `setup_trading_approvals()`, and `redeem_positions()`.
+  `place_market_order(..., order_type="FAK")` returns an accepted or rejected discriminated response and must not be retried blindly after an ambiguous transport failure.
+- `get_balance_allowance(asset_type="COLLATERAL")` reports pUSD balance and allowances in base units with six decimal places.
+- The installed SDK exports only `PRODUCTION`; it does not provide a paper or testnet environment.
 - Paginated methods (`search()`, `list_markets()`, `list_events()`, etc.) return an `AsyncPaginator` synchronously, not a coroutine.
   Get the first page with `await paginator.first_page()`, which returns `Page(items=...)`.
   Iterate all pages with `async for page in paginator`.
