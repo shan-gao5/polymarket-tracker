@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTC 15-Min Up/Down Tracker</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f14;
+    --panel: #131a22;
+    --border: #232d38;
+    --text: #e7edf3;
+    --muted: #7d8ba0;
+    --up: #29c98a;
+    --down: #ef5a6f;
+    --accent: #4da3ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    padding: 24px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 1.1rem; margin: 0; font-weight: 600; letter-spacing: 0.02em; }
+  #status {
+    font-size: 0.8rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  #status.live { color: var(--up); border-color: var(--up); }
+  #status.disconnected { color: var(--down); border-color: var(--down); }
+
+  .slug { color: var(--muted); font-size: 0.85rem; margin-bottom: 4px; }
+  .countdown {
+    font-size: 3rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin: 4px 0 20px;
+    font-variant-numeric: tabular-nums;
+  }
+  .countdown.warn { color: var(--down); }
+
+  .btc-row {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 14px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 20px;
+  }
+  .btc-price { font-size: 1.5rem; font-weight: 700; }
+  .btc-delta { font-size: 1rem; }
+  .btc-delta.up { color: var(--up); }
+  .btc-delta.down { color: var(--down); }
+  .btc-label { color: var(--muted); font-size: 0.8rem; margin-left: auto; }
+
+  .outcomes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    min-width: 0;
+  }
+  .card.up { border-color: color-mix(in srgb, var(--up) 40%, var(--border)); }
+  .card.down { border-color: color-mix(in srgb, var(--down) 40%, var(--border)); }
+  .card-title { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .card.up .card-title { color: var(--up); }
+  .card.down .card-title { color: var(--down); }
+  .prob { font-size: 2.2rem; font-weight: 700; margin: 6px 0 12px; font-variant-numeric: tabular-nums; }
+  .bar { height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; margin-bottom: 14px; }
+  .bar-fill { height: 100%; }
+  .card.up .bar-fill { background: var(--up); }
+  .card.down .bar-fill { background: var(--down); }
+  .rows { font-size: 0.85rem; color: var(--muted); display: grid; gap: 4px; }
+  .rows span.val { color: var(--text); float: right; }
+
+  footer { margin-top: 24px; font-size: 0.75rem; color: var(--muted); }
+  @media (max-width: 560px) {
+    .outcomes { grid-template-columns: 1fr; }
+    .countdown { font-size: 2.2rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>BTC 15-Minute Up/Down &mdash; Live Tracker</h1>
+    <span id="status">connecting&hellip;</span>
+  </header>
+
+  <div class="slug" id="slug">&mdash;</div>
+  <div class="countdown" id="countdown">--:--</div>
+
+  <div class="btc-row">
+    <div class="btc-price" id="btc-price">&mdash;</div>
+    <div class="btc-delta" id="btc-delta"></div>
+    <div class="btc-label">BTC/USD &middot; Chainlink, via Polymarket's public feed</div>
+  </div>
+
+  <div class="outcomes">
+    <div class="card up">
+      <div class="card-title">Up</div>
+      <div class="prob" id="up-prob">&mdash;</div>
+      <div class="bar"><div class="bar-fill" id="up-bar" style="width:0%"></div></div>
+      <div class="rows">
+        <div>bid <span class="val" id="up-bid">&mdash;</span></div>
+        <div>ask <span class="val" id="up-ask">&mdash;</span></div>
+        <div>last <span class="val" id="up-last">&mdash;</span></div>
+      </div>
+    </div>
+    <div class="card down">
+      <div class="card-title">Down</div>
+      <div class="prob" id="down-prob">&mdash;</div>
+      <div class="bar"><div class="bar-fill" id="down-bar" style="width:0%"></div></div>
+      <div class="rows">
+        <div>bid <span class="val" id="down-bid">&mdash;</span></div>
+        <div>ask <span class="val" id="down-ask">&mdash;</span></div>
+        <div>last <span class="val" id="down-last">&mdash;</span></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>Updates once per second over WebSocket. Reconnects automatically if the connection drops.</footer>
+</div>
+
+<script>
+const statusEl = document.getElementById('status');
+const slugEl = document.getElementById('slug');
+const countdownEl = document.getElementById('countdown');
+const btcPriceEl = document.getElementById('btc-price');
+const btcDeltaEl = document.getElementById('btc-delta');
+
+const fmtUsd = (n) => n == null ? '—' : '$' + n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmtPct = (n) => n == null ? '—' : (n >= 0 ? '+' : '') + n.toFixed(3) + '%';
+const fmtProb = (n) => n == null ? '—' : (n * 100).toFixed(1) + '%';
+const fmtPrice = (n) => n == null ? '—' : n.toFixed(3);
+
+function fmtCountdown(seconds) {
+  if (seconds == null) return '--:--';
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
+}
+
+function renderSide(prefix, outcome) {
+  document.getElementById(prefix + '-prob').textContent = fmtProb(outcome.midpoint);
+  document.getElementById(prefix + '-bar').style.width = (outcome.midpoint != null ? outcome.midpoint * 100 : 0) + '%';
+  document.getElementById(prefix + '-bid').textContent = fmtPrice(outcome.best_bid);
+  document.getElementById(prefix + '-ask').textContent = fmtPrice(outcome.best_ask);
+  document.getElementById(prefix + '-last').textContent = fmtPrice(outcome.last_trade_price);
+}
+
+function render(data) {
+  if (data.status === 'initializing') {
+    slugEl.textContent = 'finding current market…';
+    return;
+  }
+  slugEl.textContent = data.market_slug + (data.status === 'closed' ? ' (closed, rolling over…)' : '');
+  countdownEl.textContent = fmtCountdown(data.seconds_remaining);
+  countdownEl.classList.toggle('warn', data.seconds_remaining != null && data.seconds_remaining < 60);
+
+  btcPriceEl.textContent = fmtUsd(data.btc_price);
+  btcDeltaEl.textContent = data.btc_delta == null ? '' : (data.btc_delta >= 0 ? '▲ ' : '▼ ') + fmtUsd(Math.abs(data.btc_delta)) + ' (' + fmtPct(data.btc_delta_pct) + ')';
+  btcDeltaEl.className = 'btc-delta ' + (data.btc_delta == null ? '' : data.btc_delta >= 0 ? 'up' : 'down');
+
+  renderSide('up', data.up);
+  renderSide('down', data.down);
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+  ws.onopen = () => {
+    statusEl.textContent = 'live';
+    statusEl.className = 'live';
+  };
+  ws.onmessage = (evt) => render(JSON.parse(evt.data));
+  ws.onclose = () => {
+    statusEl.textContent = 'reconnecting…';
+    statusEl.className = 'disconnected';
+    setTimeout(connect, 1500);
+  };
+  ws.onerror = () => ws.close();
+}
+
+connect();
+</script>
+</body>
+</html>

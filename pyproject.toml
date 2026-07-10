@@ -1,0 +1,31 @@
+[project]
+name = "polymarket-tracker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.139.0",
+    "pandas>=3.0.3",
+    "polymarket-client>=0.1.0b16",
+    "sqlmodel>=0.0.39",
+    "uvicorn[standard]>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.5.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/polytracker"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

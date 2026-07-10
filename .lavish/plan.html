@@ -1,0 +1,234 @@
+<title>Polymarket BTC 15-Min Tracker: Build Plan</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Righteous&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    securityLevel: "strict",
+    themeVariables: {
+      fontFamily: '"Space Mono", ui-monospace, monospace',
+      primaryColor: "#f6d6c1",
+      primaryBorderColor: "#3d3232",
+      primaryTextColor: "#3d3232",
+      lineColor: "#a97155",
+      secondaryColor: "#cfe8e0",
+      tertiaryColor: "#faf3e6"
+    }
+  });
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  :where(p, h1, h2, h3, h4, li, td, th, .badge) { overflow-wrap: anywhere; }
+  :where(img, svg) { max-width: 100%; height: auto; }
+  body { font-family: "Space Mono", ui-monospace, monospace; }
+  h1, h2, h3, .card-title, .step { font-family: "Righteous", "Space Mono", cursive; }
+  code, .mono { font-family: "Space Mono", ui-monospace, monospace; }
+  h1 { text-shadow: 1px 1px 0 rgba(0,0,0,0.08); }
+  .card, .alert, table, .steps .step::before, .step-icon { border-radius: 0.9rem !important; }
+  .card { box-shadow: 4px 4px 0 rgba(0,0,0,0.08); }
+</style>
+
+<div data-theme="retro" class="bg-base-100 text-base-content min-h-screen">
+<main class="mx-auto max-w-6xl px-6 py-10 lg:px-10 space-y-12">
+
+  <!-- Hero -->
+  <header class="space-y-3">
+    <div class="badge badge-soft badge-primary">Planning artifact &middot; pre-implementation</div>
+    <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold">Polymarket BTC 15-Minute Up/Down Tracker</h1>
+    <p class="text-base-content/70 max-w-3xl">
+      A live tracker and a backtest pipeline for Polymarket's recurring 15-minute Bitcoin Up/Down markets,
+      built on the official <code class="mono">polymarket-client</code> Python package.
+      Source: <a class="link link-primary" href="https://docs.polymarket.com/dev-tooling/python" target="_blank" rel="noopener">docs.polymarket.com/dev-tooling/python</a>.
+    </p>
+  </header>
+
+  <!-- Confirmed resolution rule -->
+  <section class="space-y-4">
+    <div role="alert" class="alert alert-info alert-soft flex-col items-start gap-1">
+      <h3 class="font-bold">Confirmed: resolution rule &amp; oracle</h3>
+      <p class="text-sm">Each market resolves <strong>Up</strong> if the BTC price at the end of its 15-minute window is <strong>&ge;</strong> the price at the start of that window, else <strong>Down</strong>. The resolution source is <strong>Chainlink's BTC/USD Data Stream</strong> (<a class="link" href="https://data.chain.link/streams/btc-usd" target="_blank" rel="noopener">data.chain.link/streams/btc-usd</a>) &mdash; not Binance spot or any other source. See the <a class="link" href="#chainlink-note">note below</a> on what this changes for the pipeline.</p>
+    </div>
+  </section>
+
+  <!-- API keys callout -->
+  <section class="space-y-4">
+    <div role="alert" class="alert alert-success alert-outline items-start">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <div>
+        <h3 class="font-bold">Phases 1-4 (tracker + backtest) need zero API keys</h3>
+        <div class="text-sm opacity-90">Market data, order books, price history, and realtime streams are all served by <code class="mono">AsyncPublicClient</code>, which is unauthenticated. You can build and run the entire tracker and backtesting pipeline with no Polymarket account, no wallet, and no secrets.</div>
+      </div>
+    </div>
+
+    <div class="collapse collapse-arrow bg-base-200 border border-base-content/10">
+      <input type="checkbox" />
+      <div class="collapse-title font-semibold">Credentials needed only if you later add live trade execution (Phase 5)</div>
+      <div class="collapse-content">
+        <div class="overflow-x-auto rounded-box border border-base-content/10 bg-base-100 mt-2">
+          <table class="table table-sm">
+            <thead>
+              <tr><th>Variable(s)</th><th>Purpose</th><th>Required?</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono text-xs">POLYMARKET_PRIVATE_KEY</td>
+                <td>Signing key for your wallet; used by <code class="mono">AsyncSecureClient.create()</code> to authenticate and sign orders.</td>
+                <td><span class="badge badge-error badge-soft">Required</span></td>
+              </tr>
+              <tr>
+                <td class="mono text-xs">POLYMARKET_WALLET_ADDRESS</td>
+                <td>Only needed if you're not using the default derived Deposit Wallet.</td>
+                <td><span class="badge badge-ghost">Optional</span></td>
+              </tr>
+              <tr>
+                <td class="mono text-xs">POLYMARKET_RELAYER_API_KEY<br/>POLYMARKET_RELAYER_API_KEY_ADDRESS</td>
+                <td>Relayer API key pair for wallet operations and approvals.</td>
+                <td><span class="badge badge-warning badge-soft">Trading only</span></td>
+              </tr>
+              <tr>
+                <td class="mono text-xs">POLYMARKET_BUILDER_API_KEY<br/>POLYMARKET_BUILDER_SECRET<br/>POLYMARKET_BUILDER_PASSPHRASE</td>
+                <td>Legacy builder API key. Kept for backward compatibility only &mdash; order attribution now uses the <code class="mono">builder_code</code> order parameter instead.</td>
+                <td><span class="badge badge-ghost">Legacy / not needed</span></td>
+              </tr>
+              <tr>
+                <td class="mono text-xs">&mdash;</td>
+                <td>A Polygon wallet funded with USDC, plus a one-time call to <code class="mono">setup_trading_approvals()</code>.</td>
+                <td><span class="badge badge-warning badge-soft">Trading only</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-sm text-base-content/60 mt-2">None of this is needed to get the tracker or backtester running. Treat Phase 5 as a separate, later decision.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Phase overview -->
+  <section class="space-y-4">
+    <h2 class="text-xl font-bold">Phases at a glance</h2>
+    <ul class="steps steps-vertical lg:steps-horizontal w-full">
+      <li class="step step-primary">Market discovery</li>
+      <li class="step step-primary">Data pipeline</li>
+      <li class="step step-primary">Live tracker</li>
+      <li class="step step-primary">Backtest engine</li>
+      <li class="step">Live execution (optional)</li>
+    </ul>
+  </section>
+
+  <!-- Architecture diagram -->
+  <section class="space-y-4">
+    <h2 class="text-xl font-bold">Architecture &amp; data flow</h2>
+    <div class="card bg-base-200 border border-base-content/10">
+      <div class="card-body">
+        <pre class="mermaid">
+flowchart TD
+    A["Polymarket CLOB<br/>AsyncPublicClient (no auth)"] -->|"search() / list_markets()"| B["Market discovery worker<br/>find active 15-min BTC Up/Down market"]
+    B -->|"token_ids + condition_id"| C["Realtime subscribe<br/>MarketSpec + CryptoPricesSpec('prices.crypto.binance')"]
+    B -->|"get_price_history() + resolved outcome<br/>backfill closed markets"| D[("Datastore<br/>SQLite / Postgres / Parquet")]
+    C -->|"order book + BTC spot proxy ticks"| D
+    K["Chainlink BTC/USD Data Stream<br/>true resolution oracle"] -.->|"optional, paid API &mdash; live edge-case precision only"| D
+    D --> E["Live tracker<br/>FastAPI + WebSocket dashboard"]
+    D --> F["Backtest engine<br/>event-driven replay"]
+    F --> G["Strategy results<br/>PnL, Sharpe, win rate, drawdown"]
+    G -.->|"only after a strategy is validated"| H["AsyncSecureClient<br/>place_limit_order / place_market_order"]
+    H -.-> I["Polygon wallet<br/>USDC + trading approvals"]
+
+    classDef optional stroke-dasharray: 5 5,opacity:0.6;
+    class G,H,I,K optional;
+        </pre>
+        <p class="text-xs text-base-content/50 mt-2">Dashed nodes are optional. Ground-truth Up/Down labels for backtesting come straight from Polymarket's own resolved outcome, no Chainlink call needed. Chainlink Data Streams is only relevant if a live strategy needs the exact same feed Polymarket resolves against, see below.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Phase detail cards -->
+  <section class="space-y-4">
+    <h2 class="text-xl font-bold">Phase detail</h2>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+      <div class="card bg-base-200 border border-base-content/10">
+        <div class="card-body">
+          <div class="flex items-center gap-2"><span class="badge badge-primary">1</span><h3 class="card-title text-base">Market discovery</h3></div>
+          <p class="text-sm text-base-content/80">Use <code class="mono">search()</code> / <code class="mono">list_markets()</code> to find the recurring "Bitcoin Up or Down" 15-minute series and confirm the recurring slug pattern, per-interval <code class="mono">condition_id</code>, and Up/Down <code class="mono">token_ids</code>.</p>
+          <p class="text-sm text-base-content/80">Since a new market opens every 15 minutes, run a small scheduler that resolves the <em>next</em> market's ids a little before the current one closes, so the pipeline and tracker never miss a rollover.</p>
+        </div>
+      </div>
+
+      <div class="card bg-base-200 border border-base-content/10">
+        <div class="card-body">
+          <div class="flex items-center gap-2"><span class="badge badge-primary">2</span><h3 class="card-title text-base">Data pipeline</h3></div>
+          <p class="text-sm text-base-content/80">Async worker subscribes to <code class="mono">MarketSpec(token_ids=[...])</code> for book/price ticks and <code class="mono">CryptoPricesSpec(topic="prices.crypto.binance", symbols=["BTCUSDT"])</code> as a free live proxy for the underlying BTC price.</p>
+          <p class="text-sm text-base-content/80">Normalize rows &mdash; timestamp, market_id, token_id, best_bid, best_ask, midpoint, last_trade_price, btc_spot_price &mdash; into SQLite/Postgres/Parquet. Backfill closed markets via <code class="mono">get_price_history()</code>, and store each market's <strong>final resolved outcome</strong> straight from Polymarket as the backtest label &mdash; this is the actual Chainlink-derived result, so no separate oracle call is needed just to get ground truth.</p>
+        </div>
+      </div>
+
+      <div class="card bg-base-200 border border-base-content/10">
+        <div class="card-body">
+          <div class="flex items-center gap-2"><span class="badge badge-primary">3</span><h3 class="card-title text-base">Live tracker</h3></div>
+          <p class="text-sm text-base-content/80">FastAPI + WebSocket app (or a Textual terminal UI) consuming the same realtime subscription. Shows: countdown to resolution, live implied probability (midpoint), order book depth, BTC spot price and its delta from the market's open/strike price, and spread.</p>
+        </div>
+      </div>
+
+      <div class="card bg-base-200 border border-base-content/10">
+        <div class="card-body">
+          <div class="flex items-center gap-2"><span class="badge badge-primary">4</span><h3 class="card-title text-base">Backtest engine</h3></div>
+          <p class="text-sm text-base-content/80">Event-driven replay of stored ticks. Pluggable strategy interface: given an order book + BTC spot snapshot, return BUY / SELL / HOLD and size. Simulate fills against the recorded book with slippage.</p>
+          <p class="text-sm text-base-content/80">Metrics: PnL, win rate, Sharpe, max drawdown &mdash; plus a parameter-sweep / walk-forward harness for tuning strategies without overfitting.</p>
+        </div>
+      </div>
+
+      <div class="card bg-base-200/50 border border-dashed border-base-content/20 lg:col-span-2">
+        <div class="card-body">
+          <div class="flex items-center gap-2"><span class="badge badge-ghost">5</span><h3 class="card-title text-base text-base-content/70">Live execution (optional, later)</h3></div>
+          <p class="text-sm text-base-content/60">Once a strategy is validated in backtest, wire up <code class="mono">AsyncSecureClient</code> with <code class="mono">place_limit_order</code> / <code class="mono">place_market_order</code>, gated behind the credentials in the collapsible table above. Treat this as a separate go/no-go decision, not a default next step.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Open questions -->
+  <section class="space-y-4">
+    <h2 class="text-xl font-bold">Open questions to resolve before building</h2>
+    <div role="alert" class="alert alert-warning alert-soft flex-col items-start gap-2">
+      <ul class="list-disc list-inside text-sm space-y-2">
+        <li><strong>Public realtime access:</strong> the docs describe <code class="mono">CryptoPricesSpec</code> / <code class="mono">MarketSpec</code> subscriptions but don't explicitly confirm they work unauthenticated on <code class="mono">AsyncPublicClient</code> (only that <code class="mono">UserSpec</code> requires the secure client). Verify this empirically early &mdash; if it turns out to need auth, Phase 2/3 would need a lightweight secure client even without trading.</li>
+        <li><strong>Rate limits:</strong> not documented on this page. Should be measured directly (watch for <code class="mono">RateLimitError</code>) once the pipeline is polling/subscribing continuously.</li>
+      </ul>
+    </div>
+
+    <div id="chainlink-note" role="alert" class="alert alert-soft flex-col items-start gap-1 border border-base-content/10">
+      <h3 class="font-bold">Basis risk: Binance proxy vs. the real Chainlink resolution feed</h3>
+      <p class="text-sm">Binance spot price (via the free <code class="mono">CryptoPricesSpec</code>) tracks Chainlink's BTC/USD stream closely almost all the time, but the two can diverge by small amounts, and it's exactly the close-to-even markets where that divergence decides Up vs. Down. Two ways to handle it:</p>
+      <ul class="list-disc list-inside text-sm space-y-1 mt-1">
+        <li><strong>Backtesting:</strong> unaffected. We label outcomes from Polymarket's own already-resolved result, so backtest accuracy doesn't depend on reproducing Chainlink's number ourselves.</li>
+        <li><strong>Live strategy signal, near the boundary:</strong> a strategy trading close calls in real time is exposed to this basis risk. Closing it exactly requires <a class="link" href="https://docs.chain.link/data-streams" target="_blank" rel="noopener">Chainlink Data Streams</a>, which is a commercial product needing its own API credentials (contact Chainlink to get a Client ID/Secret) &mdash; separate from anything Polymarket issues. Treat as a Phase 3/4 nice-to-have, not a blocker: start with the free Binance proxy and only add Chainlink credentials if backtests show edge-case markets are where the strategy's edge lives.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Tech stack -->
+  <section class="space-y-4">
+    <h2 class="text-xl font-bold">Suggested stack</h2>
+    <div class="overflow-x-auto rounded-box border border-base-content/10 bg-base-200">
+      <table class="table table-sm">
+        <thead><tr><th>Layer</th><th>Choice</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Polymarket access</td><td class="mono text-xs">polymarket-client</td><td>Official SDK; async public client needs no auth for everything through Phase 4.</td></tr>
+          <tr><td>Storage</td><td class="mono text-xs">SQLite &rarr; Postgres</td><td>Start with SQLite/Parquet for simplicity; migrate to Postgres if running the pipeline continuously for weeks.</td></tr>
+          <tr><td>Live tracker UI</td><td class="mono text-xs">FastAPI + WebSocket</td><td>Reuses the same async subscription code; trivial to add a browser dashboard later. Textual is a lighter terminal-only alternative.</td></tr>
+          <tr><td>Backtest engine</td><td class="mono text-xs">Plain Python, pandas/polars</td><td>15-minute markets with second-level ticks are small enough not to need a heavyweight backtest framework.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+</div>
