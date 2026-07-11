@@ -32,14 +32,18 @@ Relayer credentials are required only for missing approvals, redemption, and oth
 | 3 | Live tracker dashboard (FastAPI + WebSocket) | Done |
 | 4 | Backtest engine | **Skipped by explicit user request**, not started. The data model was designed to support it without changes; see section 9. |
 | 5 | Live execution foundation | Built: authenticated doctor, paper gate, protected $5 live test, audit persistence, reconciliation, approvals, and redemption. No automated strategy yet. |
+| 6 | Paper trading foundation | Built: the standalone `btcupdown` package - deterministic window math, SDK-independent types, a Decimal-based paper trading engine, and a read-only async client (see section 10). Not yet wired into the dashboard. |
 
-### Engineering approach: no mocks
+### Engineering approach: no mocks (for `polytracker`)
 
-Every test in `tests/` runs end-to-end against the real, live Polymarket API.
+Every `polytracker` test in `tests/` runs end-to-end against the real, live Polymarket API.
 There is no mock server and no recorded-fixture replay.
 This was a deliberate choice: the `polymarket-client` package is beta (`0.1.0b16` as of writing) and its actual behavior differs from its own prose documentation in several places (see section 5).
 Mocking against assumed behavior would have baked in wrong assumptions and hidden real bugs, several of which were only caught by hitting the live service (see section 8, "Bugs found by testing live").
 The tradeoff is that the suite needs network access and takes roughly 20-30 seconds; there is no offline/CI-only mode.
+
+The `btcupdown` package (section 10) deliberately relaxes this for its pure core: window math, types, and the paper engine have no network surface, so their tests are fully deterministic and offline.
+Its client-facade tests run against a fake SDK client but construct *real* SDK event/model objects wherever the facade's behavior depends on them, and two live smoke tests still verify discovery, books, and price history against the real API - so the "verify against the live service" principle is preserved at the SDK boundary rather than abandoned.
 
 ## 2. Repository layout
 
@@ -52,11 +56,21 @@ src/polytracker/
   tracker/
     app.py                # FastAPI app: runs the ingestion pipeline in the background, serves a WebSocket + REST snapshot
     static/index.html      # dashboard frontend: vanilla HTML/CSS/JS, no build step, no framework
+  trading/                # Phase 5 live execution foundation: config, risk checks, paper/live executors, reconciliation, CLI (see section 9)
+src/btcupdown/             # Phase 6 paper trading foundation, a standalone package (see section 10)
+  windows.py               # deterministic window/slug math, no network
+  types.py                 # normalized SDK-independent Market/Book/Quote types
+  paper.py                 # Decimal-based paper trading engine (PaperAccount)
+  client.py                # read-only async client facade, the only btcupdown module that touches the SDK
 tests/
   test_discovery.py        # 6 tests
   test_ingest.py            # 1 test (short live ingestion window)
   test_backfill.py          # 3 tests (against known historical resolved markets)
   test_tracker_app.py       # 3 tests (FastAPI TestClient + WebSocket)
+  test_trading.py           # 13 tests (deterministic trading safety; never places real orders)
+  test_btcupdown_core.py    # windows + types tests, deterministic and offline
+  test_btcupdown_paper.py   # PaperAccount tests, deterministic and offline
+  test_btcupdown_client.py  # client facade tests against a fake SDK, plus 2 live smoke tests
 .claude/skills/polymarket-client/SKILL.md   # loadable reference notes for the polymarket-client package
 DESIGN.md                  # this file
 README.md                  # human-facing summary
@@ -195,10 +209,12 @@ uv sync
 uv run pytest tests/ -v
 ```
 
-All 13 tests hit the real live Polymarket API. Expect ~20-30 seconds, and a working internet connection. There is no offline mode and no mocking layer - see section 1 for why.
+The `polytracker` tests hit the real live Polymarket API, so the full suite needs a working internet connection and takes roughly 20-30 seconds; there is no live-API mocking layer for them - see section 1 for why.
+The `btcupdown` tests are deterministic and offline (fake SDK client, real SDK event objects) except for two live smoke tests - see sections 1 and 10.
+The trading safety tests (`test_trading.py`) are deterministic and never place, cancel, or redeem real orders.
 
 Notable test-specific facts:
-- `tests/test_backfill.py` hardcodes `KNOWN_RESOLVED_WINDOW = 1771868700` (slug `btc-updown-15m-1771868700`), a real market confirmed closed and resolved at the time these tests were written. If Polymarket ever purges very old market data such that this window becomes unreachable, this constant needs updating to a different confirmed-resolved window.
+- `tests/test_backfill.py` hardcodes `KNOWN_RESOLVED_WINDOW = 1771868700` (slug `btc-updown-15m-1771868700`), a real market confirmed closed and resolved at the time these tests were written. `tests/test_btcupdown_client.py` reuses the same window as its `WINDOW_EPOCH` constant, including in a live smoke test. If Polymarket ever purges very old market data such that this window becomes unreachable, both constants need updating to a different confirmed-resolved window.
 - `tests/test_tracker_app.py` uses `monkeypatch.setenv("POLYTRACKER_DB_PATH", ...)` pointed at a `tmp_path`, specifically so running the test suite never collides with a real dashboard process's `data/polytracker.db`.
 - `tests/test_ingest.py` runs a real 15-second live ingestion window; it is the slowest single test.
 
@@ -244,3 +260,56 @@ Future strategy work should emit the existing prepared intent type and retain al
 ### Adding a CLI entry point for headless ingestion
 
 `ingest.run_forever()` exists but is not wired to any script entry point, and unlike `tracker/app.py`'s `pipeline_loop`, it has no retry-on-window-gap logic. If you add a `polytracker-ingest` console script, port the `_get_current_with_retry` / `_get_next_with_retry` pattern from `tracker/app.py` into `ingest.py` (or have the CLI wrap `run_forever` with the same retries) rather than shipping the more fragile version.
+
+## 10. The `btcupdown` package (paper trading foundation)
+
+`src/btcupdown` is a second, standalone package in the same repo (both are listed in `pyproject.toml`'s wheel packages).
+It is the foundation the dashboard's paper trading will build on, and it deliberately does not depend on `polytracker` (or vice versa).
+Design rule: only `btcupdown.client` may import the Polymarket SDK; every other module is pure, deterministic, and SDK-independent, so the paper engine and anything built on it can be tested offline.
+The top-level `btcupdown` `__init__` re-exports the full public surface of all four modules; it does not re-export the general SDK.
+
+### 10.1 `windows.py`
+
+Deterministic time math for the series; no network, no SDK.
+
+- `WINDOW_SECONDS = 900`, `SLUG_PREFIX = "btc-updown-15m"`.
+- `window_start_for(ts: float | datetime) -> int` - aligns a unix timestamp or datetime (naive datetimes are treated as UTC) down to its 900-second window start.
+- `slug_for(window_start_epoch) -> str` / `epoch_for_slug(slug) -> int` - round-trip between window starts and slugs; both raise `ValueError` on misaligned epochs or foreign slugs.
+- `window_bounds(window_start_epoch) -> (start, end)` - the window's UTC datetime bounds.
+
+### 10.2 `types.py`
+
+Normalized, frozen, `slots` dataclasses plus the `Outcome = Literal["up", "down"]` alias, `OUTCOMES`, and `other_outcome()`.
+
+- `Market` - one window's market: `slug`, `condition_id`, `up_token_id`/`down_token_id`, `window_start`/`window_end`, `closed`, `outcome` (`None` until resolved). Helpers: `token_id(outcome)`, `outcome_for_token(token_id)`, `window_start_epoch`, `seconds_remaining(now=None)`.
+- `BookLevel` - one `(price, size)` level, both `Decimal`.
+- `Book` - an order-book snapshot for one token. **Ordering convention: both sides are stored best-first (`bids` descending, `asks` ascending), the opposite of the raw CLOB payloads (which put the best level last, see section 5).** The constructor re-sorts whatever order it is given and drops zero-size levels. `Book.from_clob(book)` builds one from any duck-typed SDK `OrderBook`-shaped object (REST or `MarketBookEvent` payload), converting prices/sizes to `Decimal`. Properties: `best_bid`, `best_ask`, `midpoint`, `spread` (each `None` when a side is empty).
+- `Quote` - top-of-book only: `token_id`, `best_bid`, `best_ask`, `timestamp`, `midpoint` property.
+
+### 10.3 `paper.py`
+
+A deterministic paper trading engine: no network, no wallet, all money and shares as `Decimal`.
+Shares are quantized to six decimal places (`SHARE_PRECISION`), matching the on-chain resolution of Polymarket's collateral and outcome tokens.
+
+- `PaperAccount(starting_cash=Decimal("1000"))` - holds `cash`, per-`(market_slug, outcome)` `Position`s (tracked at average cost), a `trades` log, a `settlements` log, and cumulative `realized_pnl`.
+- `buy(market, outcome, spend, book, *, max_price=None, now=None)` - walks the asks best-first, filling level by level so simulated entry prices include price impact. Fill-and-kill: fills as much of `spend` as the book allows at or below `max_price` and drops the remainder (mirroring how the live executor submits FAK orders). Dust levels (size quantizing to zero) are skipped rather than aborting the walk. Raises `NoLiquidityError` if nothing fills at all.
+- `sell(market, outcome, shares, book, *, min_price=None, now=None)` - the mirror image, walking the bids; realized P&L is booked against the position's average cost.
+- Both raise `MarketClosedError` (closed or past `window_end`), `BookMismatchError` (book token does not match the outcome), `InsufficientCashError` / `InsufficientSharesError`, all subclasses of `PaperTradingError`.
+- `settle(market)` - binary settlement once `market.outcome` is set: winning shares redeem at 1.00 collateral each, losing shares expire worthless; returns a `Settlement` (or `None` if no position) and closes both positions.
+- `equity(marks)` / `unrealized_pnl(marks)` - mark-to-market against caller-supplied prices (typically best bid, the conservative liquidation-value mark); a missing mark for an open position raises `KeyError` rather than silently mis-valuing.
+
+### 10.4 `client.py`
+
+`BtcUpDownClient` - the read-only async facade, and the package's only SDK-touching module.
+Wraps `polymarket.AsyncPublicClient` (created on `__aenter__`, or injected pre-constructed for tests/sharing) and converts every SDK object to `btcupdown.types` at the edge, so callers never see SDK types.
+Everything works unauthenticated.
+
+- Discovery: `get_market(window_start_epoch)` (computes the slug locally, one `get_event` call, raises `MarketNotFoundError` on the SDK's `RequestRejectedError`), plus `get_current_market()`, `get_next_market(market)`, `get_previous_market(market)`. Outcome derivation follows the settled-price rule from section 5.
+- Market data: `get_book(market, outcome)` / `get_books(market)` (both books in one `get_order_books` call), `get_quote(market, outcome)` (derived from the full book), `get_price_history(market, outcome)` (the window's traded-price series as `PricePoint` tuples).
+- Realtime: `stream(market, *, include_btc_price=True)` subscribes one `MarketSpec(custom_feature_enabled=True)` (plus a Chainlink `CryptoPricesSpec` unless disabled) and yields the normalized union `StreamEvent = BookUpdate | QuoteUpdate | TradeUpdate | BtcPriceUpdate`. It runs until cancelled or the connection closes - the caller decides when the window is over - and closes the subscription handle in a `finally`, including when the consumer abandons the generator early.
+- `CHAINLINK_BTC_SYMBOL = "btc/usd"` is re-exported here since the stream filters Chainlink ticks to that symbol.
+
+### 10.5 Testing
+
+`test_btcupdown_core.py` and `test_btcupdown_paper.py` are fully deterministic and offline (the modules under test have no network surface).
+`test_btcupdown_client.py` runs the facade against a fake SDK client, but constructs real SDK event/model objects wherever dispatch depends on them, plus two live smoke tests (current market + books, resolved market + price history) - see section 1 for how this relates to the no-mocks rule.

@@ -15,7 +15,7 @@ import polymarket
 from polymarket.streams import UserSpec
 
 from polytracker.discovery import MarketWindow, get_current_market
-from polytracker.store import DEFAULT_DB_PATH, TradeIntent, get_session, make_engine
+from polytracker.store import DEFAULT_DB_PATH, get_session, make_engine
 from polytracker.trading.config import (
     AuthConfig,
     ConfigurationError,
