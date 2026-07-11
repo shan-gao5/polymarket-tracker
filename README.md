@@ -18,6 +18,7 @@ Live execution uses `AsyncSecureClient` with an exported signer key and the publ
 | 3. Live tracker | FastAPI + WebSocket dashboard: countdown, implied probability, order book, BTC price delta | Done |
 | 4. Backtest engine | Event-driven replay of stored ticks against pluggable strategies, with PnL/Sharpe/win-rate/drawdown metrics | **Skipped for now**, by request |
 | 5. Live execution foundation | Authenticated diagnostics, paper validation, protected live test order, persistence, reconciliation, and redemption via `AsyncSecureClient` | Done; no automated strategy yet |
+| 6. Paper trading foundation | Standalone `btcupdown` package: deterministic window math, SDK-independent market/book types, a Decimal-based paper trading engine, and a read-only async client | Done; not yet wired into the dashboard |
 
 Phase 4 was deliberately deferred rather than dropped.
 The data pipeline (Phase 2) keeps accumulating real ticks and resolved outcomes into `data/polytracker.db` any time the tracker or ingestion worker runs, so backtest data collection is not blocked on the engine existing.
@@ -35,7 +36,12 @@ src/polytracker/
     app.py             # FastAPI + WebSocket live dashboard
     static/index.html  # dashboard frontend (vanilla HTML/CSS/JS, no build step)
   trading/             # risk checks, paper/live executors, reconciliation, and CLI
-tests/                 # deterministic execution tests plus real public-API tests
+src/btcupdown/         # standalone paper-trading foundation for the same market series
+  windows.py           # deterministic window/slug math, no network
+  types.py             # normalized SDK-independent Market/Book/Quote types
+  paper.py             # Decimal-based paper trading engine (PaperAccount)
+  client.py            # read-only async client facade over the polymarket SDK
+tests/                 # deterministic execution/paper-engine tests plus real public-API tests
 ```
 
 There is no `backtest/` package yet - that is Phase 4, currently skipped.
@@ -47,8 +53,9 @@ uv sync
 uv run pytest tests/ -v
 ```
 
-Tests hit the real Polymarket API (market discovery, a short live ingestion window, and backfill of real historical markets), so they need network access and take roughly 20 seconds.
-The trading safety tests are deterministic and never place, cancel, or redeem real orders.
+The `polytracker` tests hit the real Polymarket API (market discovery, a short live ingestion window, and backfill of real historical markets), so the suite needs network access and takes roughly 20-30 seconds.
+The trading safety tests and nearly all `btcupdown` tests are deterministic and offline; two `btcupdown` live smoke tests also hit the real API.
+No test ever places, cancels, or redeems real orders.
 
 To run the live dashboard:
 
@@ -104,9 +111,21 @@ The confirmation must exactly match the current market slug.
 The command refuses stale books, insufficient time, insufficient funds or allowances, duplicate intents, blocked regions, and any spend above the fixed limit.
 Use `reconcile` after an interruption and `redeem --condition-id ID --confirm ID` after resolution.
 
+## Paper trading foundation (`btcupdown`)
+
+`src/btcupdown` is a second, standalone package that dashboard paper trading will build on.
+It requires no API keys or account, and only `btcupdown.client` touches the Polymarket SDK:
+
+- `btcupdown.windows` - deterministic window math: compute any window's slug (`btc-updown-15m-{epoch}`) locally, with no API call.
+- `btcupdown.types` - SDK-independent `Market`, `Book`, and `Quote` types; books are normalized best-first, unlike the raw CLOB payloads.
+- `btcupdown.paper` - `PaperAccount`, a pure `Decimal`-based paper trading engine with fill-and-kill book-walking fills and binary settlement.
+- `btcupdown.client` - `BtcUpDownClient`, a read-only async facade over `polymarket.AsyncPublicClient` for discovery, books, quotes, price history, and normalized realtime streaming.
+
+See the `btcupdown` section of `DESIGN.md` for the full module reference.
+
 ## Notes for contributors
 
-See `DESIGN.md` for the full technical design doc: architecture, module-by-module reference, data model, verified `polymarket-client` API behavior, bugs found by testing live, and extension points for Phase 4/5.
+See `DESIGN.md` for the full technical design doc: architecture, module-by-module reference (including the `btcupdown` package), data model, verified `polymarket-client` API behavior, bugs found by testing live, and extension points for Phase 4/5.
 It is written to be loaded whole into an agent's context with no other history needed.
 
 See `AGENTS.md` for general engineering guidelines.

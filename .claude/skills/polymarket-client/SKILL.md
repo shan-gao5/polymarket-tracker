@@ -28,6 +28,8 @@ If a new package version changes any of this, update this file rather than redis
   `place_market_order(..., order_type="FAK")` returns an accepted or rejected discriminated response and must not be retried blindly after an ambiguous transport failure.
 - `get_balance_allowance(asset_type="COLLATERAL")` reports pUSD balance and allowances in base units with six decimal places.
 - The installed SDK exports only `PRODUCTION`; it does not provide a paper or testnet environment.
+- `AsyncPublicClient.get_order_book(token_id=...)` and `get_order_books(token_ids=[...])` fetch CLOB order books unauthenticated; `get_order_books` returns a tuple with one `OrderBook` per requested token (confirmed live).
+  Normalize level ordering before use rather than assuming best-first; `btcupdown.types.Book.from_clob` does this.
 - Paginated methods (`search()`, `list_markets()`, `list_events()`, etc.) return an `AsyncPaginator` synchronously, not a coroutine.
   Get the first page with `await paginator.first_page()`, which returns `Page(items=...)`.
   Iterate all pages with `async for page in paginator`.
@@ -43,7 +45,7 @@ If a new package version changes any of this, update this file rather than redis
 
 - BTC 15-minute Up/Down market slugs follow the pattern `btc-updown-15m-{epoch_seconds}`, where `epoch_seconds` is the UTC unix timestamp of the window start, aligned to 900-second boundaries (`ts - ts % 900`).
   Fetch the market with `client.get_event(slug=slug)` and take `.markets[0]`.
-  There is no need to search or paginate to find the current market once you know this; see `polytracker.discovery`.
+  There is no need to search or paginate to find the current market once you know this; see `polytracker.discovery` and `btcupdown.windows`.
 - A not-found slug raises `polymarket.errors.RequestRejectedError`, not `UnexpectedResponseError`.
 - Outcome token ids are `market.outcomes.yes.token_id` (label "Up") and `market.outcomes.no.token_id` (label "Down") - a fixed two-field object, not a list to iterate.
 - Resolved markets settle the winning outcome's `price` to `1` and the losing one to `0`.
