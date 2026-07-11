@@ -222,10 +222,13 @@ class PaperAccount:
         for level in book.asks:
             if max_price is not None and level.price > max_price:
                 break
-            shares = _quantize_shares(min(level.size, remaining / level.price))
-            if shares <= 0:
+            affordable = _quantize_shares(remaining / level.price)
+            if affordable <= 0:
                 break
-            fill = PaperFill(price=level.price, shares=shares)
+            level_shares = _quantize_shares(level.size)
+            if level_shares <= 0:
+                continue
+            fill = PaperFill(price=level.price, shares=min(level_shares, affordable))
             fills.append(fill)
             remaining -= fill.notional
         if not fills:
@@ -283,13 +286,15 @@ class PaperAccount:
         for level in book.bids:
             if min_price is not None and level.price < min_price:
                 break
-            fill_shares = _quantize_shares(min(level.size, remaining))
-            if fill_shares <= 0:
+            sellable = _quantize_shares(remaining)
+            if sellable <= 0:
                 break
+            level_shares = _quantize_shares(level.size)
+            if level_shares <= 0:
+                continue
+            fill_shares = min(level_shares, sellable)
             fills.append(PaperFill(price=level.price, shares=fill_shares))
             remaining -= fill_shares
-            if remaining <= 0:
-                break
         if not fills:
             raise NoLiquidityError(
                 f"no bids available at or above {min_price} for {market.slug}/{outcome}"

@@ -95,6 +95,22 @@ def test_buy_is_fill_and_kill_when_book_is_shallow():
     assert account.cash == Decimal("95.00")
 
 
+def test_buy_skips_dust_level_and_fills_deeper_liquidity():
+    book = make_book(asks=[("0.50", "0.0000005"), ("0.60", "100")])
+    account = PaperAccount(starting_cash=Decimal("100"))
+    trade = account.buy(make_market(), "up", Decimal("6"), book, now=MID_WINDOW)
+    assert [(f.price, f.shares) for f in trade.fills] == [
+        (Decimal("0.60"), Decimal("10")),
+    ]
+
+
+def test_buy_stops_when_remaining_spend_is_below_share_precision():
+    book = make_book(asks=[("0.50", "100"), ("0.60", "100")])
+    account = PaperAccount(starting_cash=Decimal("100"))
+    with pytest.raises(NoLiquidityError):
+        account.buy(make_market(), "up", Decimal("0.0000001"), book, now=MID_WINDOW)
+
+
 def test_buy_rejects_when_nothing_within_limit():
     account = PaperAccount(starting_cash=Decimal("100"))
     with pytest.raises(NoLiquidityError):
@@ -171,6 +187,39 @@ def test_sell_is_fill_and_kill_when_bids_are_shallow():
     )
     assert trade.shares == Decimal("5")
     assert account.position(SLUG, "up").shares == Decimal("15")
+
+
+def test_sell_skips_dust_level_and_fills_deeper_liquidity():
+    account = PaperAccount(starting_cash=Decimal("100"))
+    market = make_market()
+    account.buy(market, "up", Decimal("10"), make_book(), now=MID_WINDOW)  # 20 shares
+    trade = account.sell(
+        market,
+        "up",
+        Decimal("20"),
+        make_book(bids=[("0.55", "0.0000005"), ("0.45", "50")]),
+        now=MID_WINDOW,
+    )
+    assert [(f.price, f.shares) for f in trade.fills] == [
+        (Decimal("0.45"), Decimal("20")),
+    ]
+
+
+def test_sell_stops_when_remaining_shares_are_below_precision():
+    account = PaperAccount(starting_cash=Decimal("100"))
+    market = make_market()
+    account.buy(market, "up", Decimal("10"), make_book(), now=MID_WINDOW)  # 20 shares
+    trade = account.sell(
+        market,
+        "up",
+        Decimal("20"),
+        make_book(bids=[("0.55", "20"), ("0.45", "50")]),
+        now=MID_WINDOW,
+    )
+    assert [(f.price, f.shares) for f in trade.fills] == [
+        (Decimal("0.55"), Decimal("20")),
+    ]
+    assert account.position(SLUG, "up") is None
 
 
 def test_sell_rejects_when_no_bid_within_limit():
