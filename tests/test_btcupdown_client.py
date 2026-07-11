@@ -22,7 +22,6 @@ from polymarket.models.rtds_events import CryptoPricesChainlinkEvent
 
 from btcupdown import (
     Book,
-    BookLevel,
     BookUpdate,
     BtcPriceUpdate,
     BtcUpDownClient,

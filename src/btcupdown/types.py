@@ -82,12 +82,12 @@ class Book:
         object.__setattr__(
             self,
             "bids",
-            tuple(sorted((l for l in self.bids if l.size > 0), key=lambda l: l.price, reverse=True)),
+            tuple(sorted((lvl for lvl in self.bids if lvl.size > 0), key=lambda lvl: lvl.price, reverse=True)),
         )
         object.__setattr__(
             self,
             "asks",
-            tuple(sorted((l for l in self.asks if l.size > 0), key=lambda l: l.price)),
+            tuple(sorted((lvl for lvl in self.asks if lvl.size > 0), key=lambda lvl: lvl.price)),
         )
 
     @classmethod
@@ -101,8 +101,8 @@ class Book:
         """
         return cls(
             token_id=str(book.token_id),
-            bids=tuple(BookLevel(price=Decimal(l.price), size=Decimal(l.size)) for l in book.bids),
-            asks=tuple(BookLevel(price=Decimal(l.price), size=Decimal(l.size)) for l in book.asks),
+            bids=tuple(BookLevel(price=Decimal(lvl.price), size=Decimal(lvl.size)) for lvl in book.bids),
+            asks=tuple(BookLevel(price=Decimal(lvl.price), size=Decimal(lvl.size)) for lvl in book.asks),
             timestamp=book.timestamp,
         )
 
